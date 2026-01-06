@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pengelompokan Pelari</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>Pengelompokan Pelari</h1>
+      <div class="actions">
+        <button id="addGroup">Tambah Kelompok</button>
+        <button id="inputNames">Input Nama</button>
+        <button id="resetAll">Reset</button>
+        <button id="exportData">Unduh Data</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="pool">
+        <div class="pool-column">
+          <h2>Pria</h2>
+          <div id="menPool" class="list"></div>
+        </div>
+        <div class="pool-column">
+          <h2>Wanita</h2>
+          <div id="womenPool" class="list"></div>
+        </div>
+      </section>
+
+      <section class="groups">
+        <h2>Kelompok</h2>
+        <div id="groupsContainer" class="groups-container"></div>
+      </section>
+    </main>
+
+    <div id="inputModal" class="modal hidden">
+      <div class="modal-content">
+        <h3>Input Daftar Nama</h3>
+        <label>
+          Gender
+          <select id="inputGender">
+            <option value="M">Pria</option>
+            <option value="W">Wanita</option>
+          </select>
+        </label>
+        <label>
+          Tempel daftar nama (satu nama per baris)
+          <textarea id="inputTextarea" rows="8" placeholder="Contoh:
+Budi
+Siti
+Andi"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button id="inputApply">Tambahkan</button>
+          <button id="inputClose" class="clear-btn">Tutup</button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div id="summary" class="summary"></div>
+    </footer>
+  </div>
+
+  <script>
+  const menNames = ["Baktiar","Kevin S","Akmal","Elmo","Hirfandiyansa","Satriyo","Leo","Akram","Octavianus Kristanto","Irfan Siama","Steven","Ray Steven","Zain","Zharfan","Abdul","raf","arshindy","Danny","Gilang P","Aditya Astika","Yahya H","Fahri","Bimo","Har","Supri","Tio","Yogi"];
+  const womenNames = ["Alya Clarissa","Miftah S R","Eli Komala","Siska","Riri Ariyanti"];
+  const state = { people: {}, men: [], women: [], groups: [] };
+  const el = {
+    menPool: document.getElementById("menPool"),
+    womenPool: document.getElementById("womenPool"),
+    groups: document.getElementById("groupsContainer"),
+    addGroup: document.getElementById("addGroup"),
+    resetAll: document.getElementById("resetAll"),
+    exportData: document.getElementById("exportData"),
+    summary: document.getElementById("summary"),
+    inputNames: document.getElementById("inputNames"),
+    inputModal: document.getElementById("inputModal"),
+    inputGender: document.getElementById("inputGender"),
+    inputTextarea: document.getElementById("inputTextarea"),
+    inputApply: document.getElementById("inputApply"),
+    inputClose: document.getElementById("inputClose")
+  };
+  function uid() { return Math.random().toString(36).slice(2, 9); }
+  function createInitial() {
+    state.people = {};
+    state.men = menNames.map((n, i) => ({ id: "M"+(i+1), name: n, gender: "M", assigned: null }));
+    state.women = womenNames.map((n, i) => ({ id: "W"+(i+1), name: n, gender: "W", assigned: null }));
+    [...state.men, ...state.women].forEach(p => state.people[p.id] = p);
+    state.groups = [];
+  }
+  function save() {
+    const data = JSON.stringify(state);
+    localStorage.setItem("groups-app", data);
+  }
+  function load() {
+    const raw = localStorage.getItem("groups-app");
+    if (!raw) return false;
+    try {
+      const s = JSON.parse(raw);
+      if (!s || !s.people || !s.groups) return false;
+      state.people = s.people;
+      state.men = s.men || [];
+      state.women = s.women || [];
+      state.groups = s.groups || [];
+      return true;
+    } catch { return false; }
+  }
+  function resetAll() {
+    createInitial();
+    renderAll();
+    save();
+  }
+  function addGroup() {
+    const id = uid();
+    state.groups.push({ id, name: "Kelompok "+(state.groups.length+1), captain: null, male: [null, null], female: [null, null] });
+    renderAll();
+    save();
+  }
+  function removeAssignment(personId) {
+    state.groups.forEach(g => {
+      if (g.captain === personId) g.captain = null;
+      g.male = g.male.map(x => x === personId ? null : x);
+      g.female = g.female.map(x => x === personId ? null : x);
+    });
+    const p = state.people[personId];
+    if (p) p.assigned = null;
+  }
+  function assign(groupId, role, index, personId) {
+    const g = state.groups.find(x => x.id === groupId);
+    const p = state.people[personId];
+    if (!g || !p) return;
+    if (role === "male" && p.gender !== "M") return;
+    if (role === "female" && p.gender !== "W") return;
+    removeAssignment(personId);
+    if (role === "captain") g.captain = personId;
+    if (role === "male") g.male[index] = personId;
+    if (role === "female") g.female[index] = personId;
+    p.assigned = { groupId, role, index };
+    renderAll();
+    save();
+  }
+  function clearSlot(groupId, role, index) {
+    const g = state.groups.find(x => x.id === groupId);
+    if (!g) return;
+    let pid = null;
+    if (role === "captain") { pid = g.captain; g.captain = null; }
+    if (role === "male") { pid = g.male[index]; g.male[index] = null; }
+    if (role === "female") { pid = g.female[index]; g.female[index] = null; }
+    if (pid && state.people[pid]) state.people[pid].assigned = null;
+    renderAll();
+    save();
+  }
+  function handleDragStart(ev) {
+    const id = ev.currentTarget.dataset.id;
+    ev.dataTransfer.setData("text/plain", id);
+  }
+  function handleDragOver(ev) {
+    ev.preventDefault();
+    ev.currentTarget.classList.add("dragover");
+  }
+  function handleDragLeave(ev) {
+    ev.currentTarget.classList.remove("dragover");
+  }
+  function handleDrop(ev) {
+    ev.preventDefault();
+    ev.currentTarget.classList.remove("dragover");
+    const personId = ev.dataTransfer.getData("text/plain");
+    const groupId = ev.currentTarget.dataset.group;
+    const role = ev.currentTarget.dataset.role;
+    const index = parseInt(ev.currentTarget.dataset.index || "0", 10);
+    assign(groupId, role, index, personId);
+  }
+  function card(person) {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.draggable = true;
+    d.dataset.id = person.id;
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = person.name;
+    const badge = document.createElement("span");
+    badge.className = "badge "+(person.gender === "M" ? "m" : "w");
+    badge.textContent = person.gender === "M" ? "Pria" : "Wanita";
+    d.appendChild(name);
+    d.appendChild(badge);
+    d.addEventListener("dragstart", handleDragStart);
+    return d;
+  }
+  function slot(group, role, index, label, personId) {
+    const s = document.createElement("div");
+    s.className = "slot";
+    s.dataset.group = group.id;
+    s.dataset.role = role;
+    s.dataset.index = index;
+    s.addEventListener("dragover", handleDragOver);
+    s.addEventListener("dragleave", handleDragLeave);
+    s.addEventListener("drop", handleDrop);
+    const left = document.createElement("div");
+    const lab = document.createElement("div");
+    lab.className = "slot-label";
+    lab.textContent = label;
+    const content = document.createElement("div");
+    content.className = "slot-content";
+    if (personId) {
+      content.textContent = state.people[personId].name;
+    } else {
+      const e = document.createElement("span");
+      e.className = "slot-empty";
+      e.textContent = "Kosong";
+      content.appendChild(e);
+    }
+    left.appendChild(lab);
+    left.appendChild(content);
+    const actions = document.createElement("div");
+    actions.className = "slot-actions";
+    const btn = document.createElement("button");
+    btn.className = "clear-btn";
+    btn.textContent = "Hapus";
+    btn.addEventListener("click", () => clearSlot(group.id, role, index));
+    actions.appendChild(btn);
+    s.appendChild(left);
+    s.appendChild(actions);
+    return s;
+  }
+  function groupCard(group) {
+    const wrap = document.createElement("div");
+    wrap.className = "group";
+    const header = document.createElement("div");
+    header.className = "group-header";
+    const title = document.createElement("div");
+    title.className = "group-title";
+    title.textContent = group.name;
+    const status = document.createElement("div");
+    status.className = "group-status";
+    const complete = !!group.captain && group.male.filter(Boolean).length === 2 && group.female.filter(Boolean).length === 2;
+    if (complete) status.classList.add("ok");
+    status.textContent = complete ? "Lengkap" : "Belum lengkap";
+    header.appendChild(title);
+    header.appendChild(status);
+    const slots = document.createElement("div");
+    slots.className = "slots";
+    slots.appendChild(slot(group, "captain", 0, "Kapten", group.captain));
+    slots.appendChild(slot(group, "male", 0, "Pelari Pria 1", group.male[0]));
+    slots.appendChild(slot(group, "male", 1, "Pelari Pria 2", group.male[1]));
+    slots.appendChild(slot(group, "female", 0, "Pelari Wanita 1", group.female[0]));
+    slots.appendChild(slot(group, "female", 1, "Pelari Wanita 2", group.female[1]));
+    wrap.appendChild(header);
+    wrap.appendChild(slots);
+    return wrap;
+  }
+  function renderPools() {
+    el.menPool.innerHTML = "";
+    el.womenPool.innerHTML = "";
+    state.men.filter(p => !p.assigned).forEach(p => el.menPool.appendChild(card(p)));
+    state.women.filter(p => !p.assigned).forEach(p => el.womenPool.appendChild(card(p)));
+  }
+  function renderGroups() {
+    el.groups.innerHTML = "";
+    state.groups.forEach(g => el.groups.appendChild(groupCard(g)));
+  }
+  function renderSummary() {
+    const totalGroups = state.groups.length;
+    const complete = state.groups.filter(g => !!g.captain && g.male.filter(Boolean).length === 2 && g.female.filter(Boolean).length === 2).length;
+    const menFree = state.men.filter(p => !p.assigned).length;
+    const womenFree = state.women.filter(p => !p.assigned).length;
+    el.summary.innerHTML = "";
+    const info = document.createElement("div");
+    info.innerHTML = "<strong>Ringkasan:</strong> Kelompok: "+totalGroups+" | Lengkap: "+complete+" | Sisa Pria: "+menFree+" | Sisa Wanita: "+womenFree;
+    const note = document.createElement("div");
+    const maxGroupsByWomen = Math.floor(state.women.length / 2);
+    const noteText = state.women.length < 6 ? "Maksimum kelompok lengkap berdasarkan wanita: "+maxGroupsByWomen : "";
+    note.className = "pill "+(womenFree < 2 ? "warn" : "ok");
+    note.textContent = noteText;
+    el.summary.appendChild(info);
+    el.summary.appendChild(note);
+  }
+  function renderAll() {
+    renderPools();
+    renderGroups();
+    renderSummary();
+  }
+  function exportData() {
+    const data = state.groups.map(g => ({
+      name: g.name,
+      captain: g.captain ? state.people[g.captain].name : null,
+      male: g.male.map(id => id ? state.people[id].name : null),
+      female: g.female.map(id => id ? state.people[id].name : null),
+      complete: !!g.captain && g.male.filter(Boolean).length === 2 && g.female.filter(Boolean).length === 2
+    }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "kelompok.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+  function openInputModal() {
+    el.inputTextarea.value = "";
+    el.inputGender.value = "M";
+    el.inputModal.classList.remove("hidden");
+  }
+  function closeInputModal() {
+    el.inputModal.classList.add("hidden");
+  }
+  function addNamesFromInput() {
+    const gender = el.inputGender.value;
+    const lines = el.inputTextarea.value.split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 0);
+    if (lines.length === 0) { closeInputModal(); return; }
+    lines.forEach(n => {
+      const id = gender === "M" ? "M"+uid() : "W"+uid();
+      const person = { id, name: n, gender, assigned: null };
+      state.people[id] = person;
+      if (gender === "M") state.men.push(person); else state.women.push(person);
+    });
+    renderAll();
+    save();
+    closeInputModal();
+  }
+  function init() {
+    const loaded = load();
+    if (!loaded) createInitial();
+    renderAll();
+    el.addGroup.addEventListener("click", addGroup);
+    el.resetAll.addEventListener("click", resetAll);
+    el.exportData.addEventListener("click", exportData);
+    el.inputNames.addEventListener("click", openInputModal);
+    el.inputApply.addEventListener("click", addNamesFromInput);
+    el.inputClose.addEventListener("click", closeInputModal);
+  }
+  init();
+  </script>
+</body>
+</html>
+
